@@ -44,6 +44,27 @@ def test_reset_config_clears_invalid_env_caches(monkeypatch):
     config_module.reset_config()
     assert "API_TIMEOUT" not in config_module._INVALID_INT_ENV_VARS
 
+
+def test_student_write_calendar_group_expands(monkeypatch):
+    monkeypatch.setenv("STUDENT_WRITE_TOOLS", "calendar")
+    config_module.reset_config()
+    assert config_module.get_config().student_write_tools == {
+        "create_my_calendar_event",
+        "update_my_calendar_event",
+        "delete_my_calendar_event",
+    }
+
+
+def test_student_write_calendar_group_is_case_insensitive_and_composable(monkeypatch):
+    monkeypatch.setenv("STUDENT_WRITE_TOOLS", "CALENDAR,submit_assignment")
+    config_module.reset_config()
+    assert config_module.get_config().student_write_tools == {
+        "create_my_calendar_event",
+        "update_my_calendar_event",
+        "delete_my_calendar_event",
+        "submit_assignment",
+    }
+
     config_module.get_config()  # valid now -> nothing recorded
     assert "API_TIMEOUT" not in config_module._INVALID_INT_ENV_VARS
 

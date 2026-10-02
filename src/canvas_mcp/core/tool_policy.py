@@ -37,6 +37,8 @@ from typing import Literal
 
 from fastmcp import FastMCP
 
+from .config import CALENDAR_WRITE_TOOL_NAMES
+
 ALLOWLIST_ENV = "ALLOWED_WRITE_TOOLS"
 
 Transport = Literal["stdio", "http"]
@@ -55,7 +57,7 @@ class Effect(StrEnum):
 
 
 TOOL_EFFECTS: dict[str, Effect] = {
-    # --- READ (57) ---
+    # --- READ (59) ---
     "analyze_peer_review_quality": Effect.READ,
     "check_enrollment": Effect.READ,
     "fetch_ufixit_report": Effect.READ,
@@ -73,6 +75,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "get_discussion_topic_details": Effect.READ,
     "get_discussion_with_replies": Effect.READ,
     "get_front_page": Effect.READ,
+    "get_my_calendar_event": Effect.READ,
     "get_my_course_grades": Effect.READ,
     "get_my_enrollments": Effect.READ,
     "get_my_peer_reviews_todo": Effect.READ,
@@ -105,6 +108,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "list_groups": Effect.READ,
     "list_module_items": Effect.READ,
     "list_modules": Effect.READ,
+    "list_my_calendar_events": Effect.READ,
     "list_pages": Effect.READ,
     "list_peer_reviews": Effect.READ,
     "list_rubrics": Effect.READ,
@@ -114,7 +118,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "read_course_file": Effect.READ,
     "scan_course_content_accessibility": Effect.READ,
     "search_canvas_tools": Effect.READ,
-    # --- CANVAS_WRITE (41) ---
+    # --- CANVAS_WRITE (43) ---
     "add_module_item": Effect.CANVAS_WRITE,
     "assign_peer_review": Effect.CANVAS_WRITE,
     "associate_rubric": Effect.CANVAS_WRITE,
@@ -136,6 +140,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "delete_assignment_with_confirmation": Effect.CANVAS_WRITE,
     "delete_module": Effect.CANVAS_WRITE,
     "delete_module_item": Effect.CANVAS_WRITE,
+    "delete_my_calendar_event": Effect.CANVAS_WRITE,
     "delete_page": Effect.CANVAS_WRITE,
     "edit_page_content": Effect.CANVAS_WRITE,
     "fix_accessibility_issues": Effect.CANVAS_WRITE,
@@ -150,6 +155,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "send_peer_review_inbox_messages": Effect.CANVAS_WRITE,
     "submit_assignment": Effect.CANVAS_WRITE,
     "update_assignment": Effect.CANVAS_WRITE,
+    "update_my_calendar_event": Effect.CANVAS_WRITE,
     "update_discussion_topic": Effect.CANVAS_WRITE,
     "update_module": Effect.CANVAS_WRITE,
     "update_module_item": Effect.CANVAS_WRITE,
@@ -174,6 +180,10 @@ _ALL_KEYWORD_TOOLS = frozenset(
     for name, effect in TOOL_EFFECTS.items()
     if effect in (Effect.CANVAS_WRITE, Effect.LOCAL_WRITE)
 )
+
+_WRITE_TOOL_GROUPS: dict[str, frozenset[str]] = {
+    "calendar": CALENDAR_WRITE_TOOL_NAMES,
+}
 
 
 class ToolPolicyError(ValueError):
@@ -209,6 +219,11 @@ def resolve_tool_policy(raw: str | None, transport: Transport) -> ToolPolicy:
         # Set but empty is NOT the same as unset. A generated allowlist that
         # became empty must fail closed, not restore unrestricted stdio access.
         return ToolPolicy(True, frozenset(), f"{ALLOWLIST_ENV} set but empty (treated as none)")
+
+    expanded: set[str] = set()
+    for name in names:
+        expanded.update(_WRITE_TOOL_GROUPS.get(name.lower(), frozenset({name})))
+    names = expanded
 
     keywords = {name for name in names if name.lower() in ("none", "all")}
     requested = names - keywords

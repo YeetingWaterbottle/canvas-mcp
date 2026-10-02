@@ -85,16 +85,22 @@ class TestOperatorCeiling:
         assert "comment_on_my_submission" not in tools
         assert "mark_module_item_done" not in tools
         assert "create_my_calendar_event" not in tools
+        assert "update_my_calendar_event" not in tools
+        assert "delete_my_calendar_event" not in tools
 
     def test_read_tool_always_registered(self):
         tools = get_tools(STUDENT_WRITE_TOOLS="")
         assert "get_my_submission" in tools
+        assert "list_my_calendar_events" in tools
+        assert "get_my_calendar_event" in tools
 
     def test_only_named_tools_register(self):
         tools = get_tools(STUDENT_WRITE_TOOLS="submit_assignment")
         assert "submit_assignment" in tools
         assert "comment_on_my_submission" not in tools
         assert "create_my_calendar_event" not in tools
+        assert "update_my_calendar_event" not in tools
+        assert "delete_my_calendar_event" not in tools
 
     def test_accepts_comma_and_space_separated(self):
         tools = get_tools(
@@ -111,6 +117,14 @@ class TestOperatorCeiling:
         tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
         assert "create_my_calendar_event" in tools
         assert "submit_assignment" not in tools
+
+    def test_calendar_update_delete_register_only_when_named(self):
+        tools = get_tools(
+            STUDENT_WRITE_TOOLS="update_my_calendar_event,delete_my_calendar_event"
+        )
+        assert "update_my_calendar_event" in tools
+        assert "delete_my_calendar_event" in tools
+        assert "create_my_calendar_event" not in tools
 
 
 def make_responder(assignment, submission=None, submit_result=None, upload=None):
@@ -355,6 +369,173 @@ class TestPersonalCalendarEvent:
         assert "end_at is not supported when all_day=true" in result
         request.assert_not_awaited()
         fetch_all.assert_not_awaited()
+
+
+class TestPersonalCalendarCrud:
+    """Read/update/delete stay on the authenticated user's personal calendar."""
+
+    @pytest.mark.asyncio
+    async def test_list_filters_non_personal_events_even_if_canvas_returns_them(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="")
+        with patch(
+            "canvas_mcp.tools.student_write._personal_calendar_context_code",
+            new=AsyncMock(return_value=("user_123", None)),
+        ), patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            fetch_all.return_value = [
+                {
+                    "id": 10,
+                    "context_code": "user_123",
+                    "title": "Personal deadline",
+                    "start_at": "2026-10-05T23:59:00-07:00",
+                },
+                {
+                    "id": 20,
+                    "context_code": "course_456",
+                    "title": "Course event",
+                    "start_at": "2026-10-06T12:00:00-07:00",
+                },
+            ]
+            result = await tools["list_my_calendar_events"](
+                start_date="2026-10-01", end_date="2026-10-31"
+            )
+
+        assert "Event ID: 10" in result
+        assert "Event ID: 20" not in result
+        params = fetch_all.await_args.kwargs["params"]
+        assert params["context_codes[]"] == ["user_123"]
+        assert params["type"] == "event"
+
+    @pytest.mark.asyncio
+    async def test_get_refuses_non_personal_event(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="")
+        with patch(
+            "canvas_mcp.tools.student_write._personal_calendar_context_code",
+            new=AsyncMock(return_value=("user_123", None)),
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            request.return_value = {
+                "id": 20,
+                "context_code": "course_456",
+                "title": "Course event",
+            }
+            result = await tools["get_my_calendar_event"](20)
+
+        assert "not on your personal Canvas calendar" in result
+
+    @pytest.mark.asyncio
+    async def test_update_never_sends_context_code_and_updates_one_occurrence(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="update_my_calendar_event")
+        before = {
+            "id": 9,
+            "context_code": "user_123",
+            "title": "Old title",
+            "start_at": "2026-10-04T23:59:00-07:00",
+            "end_at": None,
+            "all_day": False,
+        }
+        after = {
+            **before,
+            "title": "New title",
+            "start_at": "2026-10-05T06:59:00Z",
+        }
+        reads = AsyncMock(side_effect=[("user_123", before, None), ("user_123", after, None)])
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=reads,
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            request.return_value = after
+            result = await tools["update_my_calendar_event"](
+                9,
+                title="New title",
+                start_at="2026-10-04T23:59:00-07:00",
+            )
+
+        assert "calendar event updated" in result
+        put = request.await_args
+        assert put.args[:2] == ("put", "/calendar_events/9")
+        data = put.kwargs["data"]
+        assert data["which"] == "one"
+        assert data["calendar_event[title]"] == "New title"
+        assert "calendar_event[context_code]" not in data
+
+    @pytest.mark.asyncio
+    async def test_update_refuses_non_personal_event_before_put(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="update_my_calendar_event")
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=AsyncMock(
+                return_value=(
+                    "user_123",
+                    None,
+                    "❌ Refusing that calendar event because it is not on your personal Canvas calendar.",
+                )
+            ),
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            result = await tools["update_my_calendar_event"](9, title="Nope")
+
+        assert "not on your personal Canvas calendar" in result
+        request.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_never_deletes_series_or_other_calendar(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="delete_my_calendar_event")
+        before = {
+            "id": 9,
+            "context_code": "user_123",
+            "title": "Temporary event",
+            "start_at": "2026-10-04T23:59:00-07:00",
+        }
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=AsyncMock(return_value=("user_123", before, None)),
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            request.return_value = {**before, "workflow_state": "deleted"}
+            result = await tools["delete_my_calendar_event"](
+                9, cancel_reason="Temporary test cleanup"
+            )
+
+        assert "calendar event deleted" in result
+        delete = request.await_args
+        assert delete.args[:2] == ("delete", "/calendar_events/9")
+        assert delete.kwargs["params"] == {
+            "which": "one",
+            "cancel_reason": "Temporary test cleanup",
+        }
+
+    @pytest.mark.asyncio
+    async def test_delete_refuses_non_personal_event_before_delete(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="delete_my_calendar_event")
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=AsyncMock(
+                return_value=(
+                    "user_123",
+                    None,
+                    "❌ Refusing that calendar event because it is not on your personal Canvas calendar.",
+                )
+            ),
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            result = await tools["delete_my_calendar_event"](9)
+
+        assert "not on your personal Canvas calendar" in result
+        request.assert_not_awaited()
 
 
 def _mock_assignment(**overrides):

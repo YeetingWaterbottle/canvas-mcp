@@ -62,6 +62,7 @@ DESTRUCTIVE = {
     "fix_accessibility_issues",
     # Replaces existing settings/fields.
     "update_assignment",
+    "update_my_calendar_event",
     "update_syllabus",
     "update_module",
     "update_module_item",
@@ -86,6 +87,7 @@ DESTRUCTIVE = {
     "delete_page",
     "delete_module",
     "delete_module_item",
+    "delete_my_calendar_event",
     "delete_announcement_with_confirmation",
     "delete_assignment_with_confirmation",
     "delete_announcements_by_criteria",
@@ -250,7 +252,8 @@ async def test_repeatable_tools_declare_idempotency_honestly():
     for name in ("update_assignment", "update_module", "update_discussion_topic",
                  "update_rubric", "edit_page_content", "delete_page", "bulk_delete_announcements",
                  "delete_announcements_by_criteria", "delete_assignment_with_confirmation",
-                 "extract_peer_review_dataset"):
+                 "extract_peer_review_dataset", "update_my_calendar_event",
+                 "delete_my_calendar_event"):
         assert tools[name].annotations.idempotent_hint is True, (
             f"{name} converges on the same end state when repeated"
         )
@@ -262,7 +265,8 @@ async def test_read_tools_are_marked_read_only():
     tools = {tool.name: tool for tool in await _registry().list_tools()}
 
     for name in ("list_courses", "get_course_details", "check_enrollment",
-                 "list_submissions", "get_syllabus", "read_course_file"):
+                 "list_submissions", "get_syllabus", "read_course_file",
+                 "list_my_calendar_events", "get_my_calendar_event"):
         assert tools[name].annotations.read_only_hint is True, (
             f"{name} does not write and should say so"
         )

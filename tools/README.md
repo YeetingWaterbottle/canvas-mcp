@@ -191,6 +191,30 @@ requirements.
 
 ---
 
+#### `list_my_calendar_events`
+List events from the authenticated student's **personal Canvas calendar** only.
+Course and group calendar events are excluded with a hard-coded `user_<id>`
+context derived from the authenticated Canvas profile.
+
+**Parameters:**
+- `start_date` (optional): `YYYY-MM-DD` beginning of the window
+- `end_date` (optional): `YYYY-MM-DD` end of the window
+- `all_events` (optional, default `false`): ignore the date window and list all
+  personal events
+- `include_description` (optional, default `false`): include fenced event descriptions
+- `max_events` (optional, default `100`, max `200`): maximum events returned
+
+With no date parameters Canvas's normal behavior is to return today's events.
+
+#### `get_my_calendar_event`
+Read one event by Canvas event ID, but only if it belongs to the authenticated
+student's personal calendar.
+
+**Parameters:**
+- `event_id` (required): Numeric Canvas calendar event ID
+
+---
+
 #### `create_my_calendar_event`
 Create an event on the authenticated student's **personal Canvas calendar**.
 The caller cannot choose a course, group, account, or another user's calendar;
@@ -213,6 +237,29 @@ can be rerun without creating duplicate events.
 **Returns:** The created event ID after a follow-up verification read, or an
 "already exists" result if an exact matching event is present.
 
+#### `update_my_calendar_event`
+Edit one event on the authenticated student's **personal Canvas calendar**.
+The tool fetches the event first and refuses course/group/account/other-user
+events. It never sends `context_code`, so it cannot move an event to another
+calendar. Recurring events are restricted to the single named occurrence.
+
+**Parameters:**
+- `event_id` (required): Numeric Canvas calendar event ID
+- `title`, `start_at`, `end_at`, `description`, `all_day`, `location_name`,
+  `location_address`, `time_zone_edited` (optional): fields to replace
+- `clear_end_at` (optional, default `false`): remove the current end time
+
+`start_at`/`end_at` must be offset-aware ISO-8601 timestamps when supplied.
+
+#### `delete_my_calendar_event`
+Delete one event from the authenticated student's **personal Canvas calendar**.
+The event is fetched and ownership-checked before deletion. Recurring events are
+restricted to the single named occurrence rather than the full series.
+
+**Parameters:**
+- `event_id` (required): Numeric Canvas calendar event ID
+- `cancel_reason` (optional): Reason sent to Canvas for the deletion
+
 ---
 
 #### Tools that change anything: `ALLOWED_WRITE_TOOLS`
@@ -228,6 +275,7 @@ neither listed nor callable by name.
 | set but empty (blank, spaces, only commas) | Same as `none` |
 | `none` | No side-effect tools on either transport |
 | `all` | Every Canvas-write and local-write tool, but not `execute_typescript` |
+| `calendar` | The three personal-calendar write tools: create, update, delete |
 | `a,b,c` | Exactly those tools; add `execute_typescript` to allow code execution (it also needs `EXECUTE_TYPESCRIPT_ENABLED`) |
 
 An unknown name, a read tool, or `none` combined with names stops the server at
@@ -252,8 +300,14 @@ Comma- or space-separated tool names. Empty (the default) means no student write
 tool is registered at all.
 
 ```bash
-STUDENT_WRITE_TOOLS=submit_assignment,comment_on_my_submission,create_my_calendar_event
+STUDENT_WRITE_TOOLS=calendar
 ```
+
+`calendar` is a convenience group alias for `create_my_calendar_event`,
+`update_my_calendar_event`, and `delete_my_calendar_event`. It works in both
+`STUDENT_WRITE_TOOLS` and `ALLOWED_WRITE_TOOLS`. The two personal-calendar read
+tools are always available in the student profile and do not belong in either
+write allowlist.
 
 **2. Per-course instructor policy (course-scoped writes only)**
 
@@ -286,9 +340,9 @@ Anything ambiguous denies: a malformed policy, contradictory directives (an
 `agent_writes: deny` appended under an earlier `allow`), a failed read, or a
 course this caller cannot see.
 
-`create_my_calendar_event` is intentionally outside that course-policy layer:
-it can write only to the authenticated user's personal calendar and cannot target
-a course calendar.
+The personal calendar write tools are intentionally outside that course-policy
+layer: they can act only on the authenticated user's personal calendar and cannot
+target a course calendar.
 
 ---
 

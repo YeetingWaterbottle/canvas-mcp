@@ -28,9 +28,9 @@ Reduce tool overhead by setting a role-based profile. Only tools relevant to the
 
 ```
 # In .env:
-CANVAS_ROLE=student    # 38 tools by default; up to 42 with all student writes enabled
+CANVAS_ROLE=student    # 40 tools by default; up to 46 with all student writes enabled
 CANVAS_ROLE=educator   # 92 tools (educator + shared)
-CANVAS_ROLE=all        # Default profile; 99 tools by default, 105 with all feature-gated tools enabled
+CANVAS_ROLE=all        # Default profile; 101 tools by default, 109 with all feature-gated tools enabled
 ```
 
 Or via CLI flag: `canvas-mcp-server --role student` (CLI flag takes precedence over env var).
@@ -48,6 +48,8 @@ Personal academic tracking uses Canvas "self" endpoints. Shared course-content t
 | `get_my_course_grades` | Current grades across courses |
 | `get_my_peer_reviews_todo` | Pending peer reviews to complete |
 | `get_my_submission` | Your submission for one assignment, with attempts used |
+| `list_my_calendar_events` | List events on your personal Canvas calendar |
+| `get_my_calendar_event` | Read one personal calendar event by ID |
 
 ### Student Write Tools (off by default)
 Let an agent act on Canvas for the student rather than only read. **None of these
@@ -60,15 +62,18 @@ instructor can still block them in their own course.
 | `comment_on_my_submission` | Comment on your own submission |
 | `mark_module_item_done` | Mark a module item done for yourself |
 | `create_my_calendar_event` | Create an event on your own personal Canvas calendar |
+| `update_my_calendar_event` | Edit one event on your own personal Canvas calendar |
+| `delete_my_calendar_event` | Delete one event from your own personal Canvas calendar |
 
 Three things to know before using them:
 
-1. **They may not exist.** Operators enable them individually via
-   `STUDENT_WRITE_TOOLS`, which defaults to empty. A disabled tool is absent
-   from the tool list entirely, so treat its absence as normal.
+1. **They may not exist.** Operators enable them via `STUDENT_WRITE_TOOLS`, which
+   defaults to empty. Tools can be named individually; the convenience alias
+   `calendar` enables create/update/delete personal-calendar writes together. A
+   disabled tool is absent from the tool list entirely, so treat its absence as normal.
 2. **An instructor can turn course-scoped student writes off per course.** If a write comes back blocked,
    that is the course's stated policy. Relay the reason to the student and do not
-   look for a way around it. Personal calendar events are not course-scoped and
+   look for a way around it. Personal calendar operations are not course-scoped and
    therefore do not consult an instructor course policy.
 3. **`submit_assignment` is two calls.** The first returns a preview and a
    confirmation token, and submits nothing. **Show the preview to the student and

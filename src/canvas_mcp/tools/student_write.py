@@ -36,7 +36,7 @@ import hashlib
 import os
 import tempfile
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
@@ -83,6 +83,11 @@ _INVALID_ASSIGNMENT_ID = (
     "Use list_assignments to find it."
 )
 
+_INVALID_CALENDAR_EVENT_ID = (
+    "Error: event_id must be a numeric Canvas calendar event ID. "
+    "Use list_my_calendar_events to find it."
+)
+
 
 def _parse_event_datetime(value: str, field_name: str) -> tuple[str | None, datetime | None, str | None]:
     """Validate an offset-aware ISO-8601 event timestamp.
@@ -123,6 +128,103 @@ def _same_event_instant(left: Any, right: datetime) -> bool:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return False
     return parsed.timestamp() == right.timestamp()
+
+
+def _parse_calendar_date(
+    value: str, field_name: str
+) -> tuple[str | None, date | None, str | None]:
+    """Validate a YYYY-MM-DD date used for calendar listing windows."""
+    raw = value.strip()
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError:
+        return None, None, f"Error: {field_name} must be YYYY-MM-DD"
+    return parsed.isoformat(), parsed, None
+
+
+async def _personal_calendar_context_code() -> tuple[str | None, str | None]:
+    """Return the authenticated user's personal Canvas calendar context code."""
+    profile = await make_canvas_request("get", "/users/self/profile")
+    if not isinstance(profile, dict) or "error" in profile:
+        detail = profile.get("error") if isinstance(profile, dict) else profile
+        return None, f"Could not read your Canvas profile: {detail}"
+    raw_user_id = profile.get("id")
+    if not isinstance(raw_user_id, (str, int)):
+        return None, "Canvas returned no usable user ID"
+    user_id = coerce_canvas_id(raw_user_id)
+    if user_id is None:
+        return None, "Canvas returned no usable user ID"
+    return f"user_{user_id}", None
+
+
+async def _get_my_calendar_event_record(
+    event_id: str | int,
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """Fetch one event and prove it belongs to the authenticated user's calendar."""
+    validated_event_id = coerce_canvas_id(event_id)
+    if validated_event_id is None:
+        return None, None, _INVALID_CALENDAR_EVENT_ID
+
+    context_code, context_error = await _personal_calendar_context_code()
+    if context_error:
+        return None, None, f"❌ {context_error}."
+    assert context_code is not None
+
+    event = await make_canvas_request("get", f"/calendar_events/{validated_event_id}")
+    if not isinstance(event, dict) or "error" in event:
+        detail = event.get("error") if isinstance(event, dict) else event
+        return (
+            context_code,
+            None,
+            f"❌ Could not read calendar event {validated_event_id}: {detail}",
+        )
+    if event.get("context_code") != context_code:
+        return (
+            context_code,
+            None,
+            "❌ Refusing that calendar event because it is not on your personal "
+            "Canvas calendar.",
+        )
+    return context_code, event, None
+
+
+def _format_personal_calendar_event(
+    event: dict[str, Any], *, include_description: bool
+) -> str:
+    """Format one personal event while fencing all user-authored text."""
+    title = fence_untrusted_inline(
+        str(event.get("title") or "Untitled"), "calendar event title"
+    )
+    lines = [
+        f"Event ID: {event.get('id', 'N/A')}",
+        f"Title: {title}",
+        f"Start: {event.get('start_at') or event.get('all_day_date') or 'N/A'}",
+        f"End: {event.get('end_at') or 'N/A'}",
+        f"All day: {bool(event.get('all_day'))}",
+        f"State: {event.get('workflow_state', 'N/A')}",
+    ]
+    if event.get("location_name"):
+        lines.append(
+            "Location: "
+            + fence_untrusted_inline(
+                str(event["location_name"]), "calendar event location"
+            )
+        )
+    if event.get("location_address"):
+        lines.append(
+            "Address: "
+            + fence_untrusted_inline(
+                str(event["location_address"]), "calendar event address"
+            )
+        )
+    if include_description and event.get("description"):
+        lines.append(
+            "Description:\n"
+            + fence_untrusted(
+                str(event["description"]), "calendar event description"
+            )
+        )
+    return "\n".join(lines)
 
 # Whole-request upload bounds. These exist on top of the per-file limit in
 # core/file_validation, which on its own would allow an unlimited number of
@@ -1089,6 +1191,103 @@ def register_student_write_tools(mcp: FastMCP) -> None:
 
             return "✅ Module item marked done."
 
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @validate_params
+    async def list_my_calendar_events(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        all_events: bool = False,
+        include_description: bool = False,
+        max_events: int = 100,
+    ) -> str:
+        """List events on YOUR OWN personal Canvas calendar.
+
+        By default Canvas returns events for today. Supply start_date/end_date as
+        YYYY-MM-DD for a range, or all_events=true to ignore the date window.
+        Course/group calendar events are excluded by a hard-coded personal
+        context derived from the authenticated Canvas user.
+        """
+        if max_events < 1 or max_events > 200:
+            return "Error: max_events must be between 1 and 200"
+
+        normalized_start: str | None = None
+        normalized_end: str | None = None
+        start_obj: date | None = None
+        end_obj: date | None = None
+        if start_date is not None:
+            normalized_start, start_obj, error = _parse_calendar_date(
+                start_date, "start_date"
+            )
+            if error:
+                return error
+        if end_date is not None:
+            normalized_end, end_obj, error = _parse_calendar_date(
+                end_date, "end_date"
+            )
+            if error:
+                return error
+        if start_obj is not None and end_obj is not None and end_obj < start_obj:
+            return "Error: end_date cannot be earlier than start_date"
+
+        context_code, context_error = await _personal_calendar_context_code()
+        if context_error:
+            return f"❌ {context_error}."
+        assert context_code is not None
+
+        params: dict[str, Any] = {
+            "type": "event",
+            "context_codes[]": [context_code],
+        }
+        if all_events:
+            params["all_events"] = True
+        else:
+            if normalized_start is not None:
+                params["start_date"] = normalized_start
+            if normalized_end is not None:
+                params["end_date"] = normalized_end
+
+        events = await fetch_all_paginated_results("/calendar_events", params=params)
+        if isinstance(events, dict) and "error" in events:
+            return f"❌ Could not list your calendar events: {events['error']}"
+        if not isinstance(events, list):
+            return "❌ Canvas returned an unexpected calendar response."
+
+        personal = [
+            event
+            for event in events
+            if isinstance(event, dict) and event.get("context_code") == context_code
+        ]
+        if not personal:
+            return "No personal Canvas calendar events found for that window."
+
+        personal.sort(
+            key=lambda event: str(
+                event.get("start_at") or event.get("all_day_date") or ""
+            )
+        )
+        shown = personal[:max_events]
+        blocks = [
+            _format_personal_calendar_event(
+                event, include_description=include_description
+            )
+            for event in shown
+        ]
+        header = f"Your personal Canvas calendar events ({len(shown)} shown"
+        if len(personal) > len(shown):
+            header += f", {len(personal) - len(shown)} more not shown"
+        header += "):"
+        return header + "\n\n" + "\n\n---\n\n".join(blocks)
+
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @validate_params
+    async def get_my_calendar_event(event_id: str | int) -> str:
+        """Get one event from YOUR OWN personal Canvas calendar by event ID."""
+        _, event, error = await _get_my_calendar_event_record(event_id)
+        if error:
+            return error
+        assert event is not None
+        return _format_personal_calendar_event(event, include_description=True)
+
     if "create_my_calendar_event" in enabled:
 
         @mcp.tool(annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False))
@@ -1295,4 +1494,281 @@ def register_student_write_tools(mcp: FastMCP) -> None:
             return (
                 "✅ Personal Canvas calendar event created.\n"
                 f"Event ID: {event_id}\nTitle: {title}\nStart: {normalized_start}"
+            )
+
+    if "update_my_calendar_event" in enabled:
+
+        @mcp.tool(annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=True))
+        @validate_params
+        async def update_my_calendar_event(
+            event_id: str | int,
+            title: str | None = None,
+            start_at: str | None = None,
+            end_at: str | None = None,
+            description: str | None = None,
+            all_day: bool | None = None,
+            location_name: str | None = None,
+            location_address: str | None = None,
+            time_zone_edited: str | None = None,
+            clear_end_at: bool = False,
+        ) -> str:
+            """Update one event on YOUR OWN personal Canvas calendar.
+
+            The event is fetched first and must already belong to the authenticated
+            user's personal calendar. The tool never sends context_code, so it
+            cannot move an event to a course, group, account, or another user.
+            Recurring-series operations are deliberately limited to this one event.
+            """
+            context_code, current, error = await _get_my_calendar_event_record(event_id)
+            if error:
+                return error
+            assert context_code is not None and current is not None
+
+            validated_event_id = coerce_canvas_id(event_id)
+            if validated_event_id is None:
+                return _INVALID_CALENDAR_EVENT_ID
+
+            if not any(
+                value is not None
+                for value in (
+                    title,
+                    start_at,
+                    end_at,
+                    description,
+                    all_day,
+                    location_name,
+                    location_address,
+                    time_zone_edited,
+                )
+            ) and not clear_end_at:
+                return "Error: provide at least one calendar event field to update"
+
+            text_fields = (
+                title,
+                description,
+                location_name,
+                location_address,
+                time_zone_edited,
+            )
+            if any(value and contains_fence_markers(value) for value in text_fields):
+                return FENCE_LEAK_ERROR
+
+            data: dict[str, Any] = {"which": "one"}
+            if title is not None:
+                clean_title = title.strip()
+                if not clean_title:
+                    return "Error: title cannot be empty"
+                if len(clean_title) > 255:
+                    return "Error: title cannot exceed 255 characters"
+                data["calendar_event[title]"] = clean_title
+
+            normalized_start: str | None = None
+            start_dt: datetime | None = None
+            if start_at is not None:
+                normalized_start, start_dt, start_error = _parse_event_datetime(
+                    start_at, "start_at"
+                )
+                if start_error:
+                    return start_error
+                assert normalized_start is not None and start_dt is not None
+                data["calendar_event[start_at]"] = normalized_start
+
+            effective_all_day = (
+                all_day if all_day is not None else bool(current.get("all_day"))
+            )
+            if all_day is not None:
+                data["calendar_event[all_day]"] = all_day
+
+            normalized_end: str | None = None
+            end_dt: datetime | None = None
+            if effective_all_day and end_at is not None:
+                return (
+                    "Error: end_at is not supported when the resulting event is "
+                    "all-day. Use clear_end_at=true if needed."
+                )
+            if end_at is not None:
+                normalized_end, end_dt, end_error = _parse_event_datetime(
+                    end_at, "end_at"
+                )
+                if end_error:
+                    return end_error
+                assert normalized_end is not None and end_dt is not None
+                data["calendar_event[end_at]"] = normalized_end
+            if clear_end_at or all_day is True:
+                data["calendar_event[end_at]"] = ""
+
+            if not effective_all_day:
+                compare_start = start_dt
+                if compare_start is None and isinstance(current.get("start_at"), str):
+                    _, compare_start, _ = _parse_event_datetime(
+                        str(current["start_at"]), "current start_at"
+                    )
+                compare_end = end_dt
+                if (
+                    compare_end is None
+                    and not clear_end_at
+                    and isinstance(current.get("end_at"), str)
+                ):
+                    _, compare_end, _ = _parse_event_datetime(
+                        str(current["end_at"]), "current end_at"
+                    )
+                if (
+                    compare_start is not None
+                    and compare_end is not None
+                    and compare_end.timestamp() < compare_start.timestamp()
+                ):
+                    return "Error: resulting end_at cannot be earlier than start_at"
+
+            if description is not None:
+                data["calendar_event[description]"] = description
+            if location_name is not None:
+                data["calendar_event[location_name]"] = location_name
+            if location_address is not None:
+                data["calendar_event[location_address]"] = location_address
+            if time_zone_edited is not None:
+                data["calendar_event[time_zone_edited]"] = time_zone_edited
+
+            response = await make_canvas_request(
+                "put",
+                f"/calendar_events/{validated_event_id}",
+                data=data,
+                use_form_data=True,
+            )
+            uncertain = (
+                isinstance(response, RequestFailure)
+                and response.outcome is WriteOutcome.MAY_HAVE_WRITTEN
+            )
+            if isinstance(response, RequestFailure) and not uncertain:
+                return f"❌ Calendar event update failed: {response['error']}"
+            if (
+                not isinstance(response, RequestFailure)
+                and (not isinstance(response, dict) or "error" in response)
+            ):
+                detail = response.get("error") if isinstance(response, dict) else response
+                return f"❌ Calendar event update failed: {detail}"
+
+            after_context, after, after_error = await _get_my_calendar_event_record(
+                validated_event_id
+            )
+            if after_error or after_context != context_code or after is None:
+                return unconfirmed_write_warning(
+                    "the personal calendar event was updated",
+                    {"Event ID": validated_event_id},
+                    "Canvas may have accepted the update, but the follow-up read "
+                    "could not confirm the event. Check Canvas before retrying.",
+                )
+
+            checks: list[bool] = []
+            if title is not None:
+                checks.append(after.get("title") == title.strip())
+            if all_day is not None:
+                checks.append(bool(after.get("all_day")) is all_day)
+            if start_dt is not None:
+                if effective_all_day:
+                    checks.append(
+                        after.get("all_day_date") == start_dt.date().isoformat()
+                    )
+                else:
+                    checks.append(_same_event_instant(after.get("start_at"), start_dt))
+            if end_dt is not None:
+                checks.append(_same_event_instant(after.get("end_at"), end_dt))
+            if clear_end_at or all_day is True:
+                checks.append(not after.get("end_at"))
+            if description is not None:
+                checks.append(str(after.get("description") or "") == description)
+            if location_name is not None:
+                checks.append(str(after.get("location_name") or "") == location_name)
+            if location_address is not None:
+                checks.append(
+                    str(after.get("location_address") or "") == location_address
+                )
+
+            if checks and not all(checks):
+                return unconfirmed_write_warning(
+                    "the personal calendar event was updated",
+                    {"Event ID": validated_event_id},
+                    "Canvas returned the event after the update, but one or more "
+                    "requested fields did not match. Check Canvas before retrying.",
+                )
+
+            suffix = " after an uncertain transport response" if uncertain else ""
+            return (
+                f"✅ Personal Canvas calendar event updated{suffix}.\n"
+                + _format_personal_calendar_event(after, include_description=False)
+            )
+
+    if "delete_my_calendar_event" in enabled:
+
+        @mcp.tool(annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=True))
+        @validate_params
+        async def delete_my_calendar_event(
+            event_id: str | int,
+            cancel_reason: str | None = None,
+        ) -> str:
+            """Delete one event from YOUR OWN personal Canvas calendar.
+
+            The event is fetched first and must belong to the authenticated user's
+            personal calendar. For recurring events, only the named event is
+            deleted; the tool never deletes an entire series.
+            """
+            context_code, current, error = await _get_my_calendar_event_record(event_id)
+            if error:
+                return error
+            assert context_code is not None and current is not None
+
+            validated_event_id = coerce_canvas_id(event_id)
+            if validated_event_id is None:
+                return _INVALID_CALENDAR_EVENT_ID
+            if cancel_reason and contains_fence_markers(cancel_reason):
+                return FENCE_LEAK_ERROR
+
+            params: dict[str, Any] = {"which": "one"}
+            if cancel_reason is not None:
+                params["cancel_reason"] = cancel_reason
+
+            response = await make_canvas_request(
+                "delete",
+                f"/calendar_events/{validated_event_id}",
+                params=params,
+            )
+            if isinstance(response, RequestFailure):
+                if response.outcome is not WriteOutcome.MAY_HAVE_WRITTEN:
+                    return f"❌ Calendar event deletion failed: {response['error']}"
+
+                after = await make_canvas_request(
+                    "get", f"/calendar_events/{validated_event_id}"
+                )
+                if (
+                    isinstance(after, dict)
+                    and "error" in after
+                    and str(after["error"]).startswith("HTTP error: 404")
+                ):
+                    return (
+                        "✅ Personal Canvas calendar event deleted after an uncertain "
+                        f"transport response.\nEvent ID: {validated_event_id}"
+                    )
+                return unconfirmed_write_warning(
+                    "the personal calendar event was deleted",
+                    {"Event ID": validated_event_id},
+                    "Canvas may have accepted the deletion, but it could not be "
+                    "confirmed. Check Canvas before retrying.",
+                )
+
+            if not isinstance(response, dict) or "error" in response:
+                detail = response.get("error") if isinstance(response, dict) else response
+                return f"❌ Calendar event deletion failed: {detail}"
+            if response.get("context_code") not in (None, context_code):
+                return unconfirmed_write_warning(
+                    "the personal calendar event was deleted",
+                    {"Event ID": validated_event_id},
+                    "Canvas returned an unexpected calendar context after deletion. "
+                    "Check your personal calendar before retrying.",
+                )
+
+            title = fence_untrusted_inline(
+                str(current.get("title") or "Untitled"), "calendar event title"
+            )
+            return (
+                "✅ Personal Canvas calendar event deleted.\n"
+                f"Event ID: {validated_event_id}\nTitle: {title}"
             )

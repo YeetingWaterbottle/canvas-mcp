@@ -1151,6 +1151,69 @@
       "notes": "Disabled unless the operator lists it in STUDENT_WRITE_TOOLS."
     },
     {
+      "name": "list_my_calendar_events",
+      "category": "student",
+      "description": "List events on your own personal Canvas calendar",
+      "parameters": [
+        {
+          "name": "start_date",
+          "type": "string",
+          "required": false,
+          "description": "Optional YYYY-MM-DD start of the calendar window"
+        },
+        {
+          "name": "end_date",
+          "type": "string",
+          "required": false,
+          "description": "Optional YYYY-MM-DD end of the calendar window"
+        },
+        {
+          "name": "all_events",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Ignore the date window and list all personal events"
+        },
+        {
+          "name": "include_description",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Include fenced event descriptions"
+        },
+        {
+          "name": "max_events",
+          "type": "integer",
+          "required": false,
+          "default": 100,
+          "description": "Maximum events to return (1-200)"
+        }
+      ],
+      "returns": "Personal calendar event IDs, titles, dates/times, locations, and optionally descriptions",
+      "examples": [
+        "List my Canvas calendar events from October 1 through October 31"
+      ],
+      "notes": "Always restricted to the authenticated user's personal Canvas calendar; course/group events are excluded."
+    },
+    {
+      "name": "get_my_calendar_event",
+      "category": "student",
+      "description": "Read one event from your own personal Canvas calendar",
+      "parameters": [
+        {
+          "name": "event_id",
+          "type": "string | integer",
+          "required": true,
+          "description": "Numeric Canvas calendar event ID"
+        }
+      ],
+      "returns": "The personal event's ID, title, time, location, state, and fenced description",
+      "examples": [
+        "Show me Canvas calendar event 1503983"
+      ],
+      "notes": "Refuses an event if it is not on the authenticated user's personal Canvas calendar."
+    },
+    {
       "name": "create_my_calendar_event",
       "category": "student_write",
       "description": "Create an event on your own personal Canvas calendar",
@@ -1210,6 +1273,103 @@
         "Add CSE 110 — Prototyping response due to my Canvas calendar for Oct 2 at 4 PM Pacific"
       ],
       "notes": "Disabled unless the operator lists it in STUDENT_WRITE_TOOLS. Always targets the authenticated user's personal calendar; callers cannot choose a course, group, account, or another user's calendar."
+    },
+    {
+      "name": "update_my_calendar_event",
+      "category": "student_write",
+      "description": "Edit one event on your own personal Canvas calendar",
+      "parameters": [
+        {
+          "name": "event_id",
+          "type": "string | integer",
+          "required": true,
+          "description": "Numeric Canvas calendar event ID"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "description": "Replacement event title"
+        },
+        {
+          "name": "start_at",
+          "type": "string",
+          "required": false,
+          "description": "Replacement offset-aware ISO-8601 start datetime"
+        },
+        {
+          "name": "end_at",
+          "type": "string",
+          "required": false,
+          "description": "Replacement offset-aware ISO-8601 end datetime"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Replacement event description"
+        },
+        {
+          "name": "all_day",
+          "type": "boolean",
+          "required": false,
+          "description": "Replacement all-day state"
+        },
+        {
+          "name": "location_name",
+          "type": "string",
+          "required": false,
+          "description": "Replacement location label"
+        },
+        {
+          "name": "location_address",
+          "type": "string",
+          "required": false,
+          "description": "Replacement location address"
+        },
+        {
+          "name": "time_zone_edited",
+          "type": "string",
+          "required": false,
+          "description": "Optional IANA or Rails timezone name recorded by Canvas"
+        },
+        {
+          "name": "clear_end_at",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Remove the event's existing end time"
+        }
+      ],
+      "returns": "Verified updated personal event details",
+      "examples": [
+        "Move my Canvas calendar event 1503983 to 10:00 PM"
+      ],
+      "notes": "Disabled unless listed in STUDENT_WRITE_TOOLS. Refuses non-personal events and never sends context_code, so it cannot move an event to another calendar."
+    },
+    {
+      "name": "delete_my_calendar_event",
+      "category": "student_write",
+      "description": "Delete one event from your own personal Canvas calendar",
+      "parameters": [
+        {
+          "name": "event_id",
+          "type": "string | integer",
+          "required": true,
+          "description": "Numeric Canvas calendar event ID"
+        },
+        {
+          "name": "cancel_reason",
+          "type": "string",
+          "required": false,
+          "description": "Optional deletion/cancellation reason sent to Canvas"
+        }
+      ],
+      "returns": "Confirmation that the personal event was deleted",
+      "examples": [
+        "Delete my temporary Canvas calendar event 1503981"
+      ],
+      "notes": "Disabled unless listed in STUDENT_WRITE_TOOLS. Refuses non-personal events and only deletes the named occurrence, not an entire recurring series."
     },
     {
       "name": "list_code_api_modules",

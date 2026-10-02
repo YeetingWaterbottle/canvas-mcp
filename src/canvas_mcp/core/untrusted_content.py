@@ -85,6 +85,7 @@ READ_TOOL_CONTENT_POLICIES: dict[str, ReadToolContentPolicy] = {
     "get_discussion_topic_details": _fenced("fence_untrusted"),
     "get_discussion_with_replies": _fenced("fence_untrusted"),
     "get_front_page": _fenced("fence_untrusted"),
+    "get_my_calendar_event": _fenced("_format_personal_calendar_event"),
     "get_my_course_grades": _deferred(
         "Returns the caller's numeric grades with course name/code, the documented course-identity exception."
     ),
@@ -129,6 +130,7 @@ READ_TOOL_CONTENT_POLICIES: dict[str, ReadToolContentPolicy] = {
     "list_groups": _fenced("fence_untrusted_inline"),
     "list_module_items": _fenced("fence_untrusted_inline"),
     "list_modules": _fenced("fence_untrusted_inline"),
+    "list_my_calendar_events": _fenced("_format_personal_calendar_event"),
     "list_pages": _fenced("fence_untrusted"),
     "list_peer_reviews": _fenced("fence_untrusted_inline"),
     "list_rubrics": _fenced("fence_untrusted_inline"),

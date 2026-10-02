@@ -26,7 +26,32 @@ STUDENT_WRITE_TOOL_NAMES = frozenset({
     "comment_on_my_submission",
     "mark_module_item_done",
     "create_my_calendar_event",
+    "update_my_calendar_event",
+    "delete_my_calendar_event",
 })
+
+CALENDAR_WRITE_TOOL_NAMES = frozenset({
+    "create_my_calendar_event",
+    "update_my_calendar_event",
+    "delete_my_calendar_event",
+})
+
+STUDENT_WRITE_TOOL_GROUPS: dict[str, frozenset[str]] = {
+    "calendar": CALENDAR_WRITE_TOOL_NAMES,
+}
+
+
+def _parse_student_write_tools(raw: str) -> frozenset[str]:
+    """Parse STUDENT_WRITE_TOOLS and expand supported group aliases."""
+    names = {
+        name.strip()
+        for name in raw.replace(",", " ").split()
+        if name.strip()
+    }
+    expanded: set[str] = set()
+    for name in names:
+        expanded.update(STUDENT_WRITE_TOOL_GROUPS.get(name.lower(), frozenset({name})))
+    return frozenset(expanded)
 
 
 def _parse_keys(raw: str) -> frozenset[str]:
@@ -359,10 +384,8 @@ class Config:
         # Campus-wide operator ceiling. Empty (the default) means NO student write
         # tool is registered, so an unlisted tool never enters the MCP tool list at
         # all. Accepts comma- and/or space-separated tool names.
-        self.student_write_tools = frozenset(
-            name.strip()
-            for name in os.getenv("STUDENT_WRITE_TOOLS", "").replace(",", " ").split()
-            if name.strip()
+        self.student_write_tools = _parse_student_write_tools(
+            os.getenv("STUDENT_WRITE_TOOLS", "")
         )
         # Per-course instructor policy. Can further restrict (never expand) the
         # operator ceiling above.

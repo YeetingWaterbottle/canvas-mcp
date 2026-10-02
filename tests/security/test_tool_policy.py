@@ -137,6 +137,25 @@ def test_explicit_names_allow_exactly_those():
     assert policy.allowed == {"send_conversation", "update_page_settings"}
 
 
+def test_calendar_group_allows_exactly_calendar_writes():
+    policy = resolve_tool_policy("calendar", "http")
+    assert policy.allowed == {
+        "create_my_calendar_event",
+        "update_my_calendar_event",
+        "delete_my_calendar_event",
+    }
+
+
+def test_calendar_group_is_case_insensitive_and_composable():
+    policy = resolve_tool_policy("CALENDAR,send_conversation", "http")
+    assert policy.allowed == {
+        "create_my_calendar_event",
+        "update_my_calendar_event",
+        "delete_my_calendar_event",
+        "send_conversation",
+    }
+
+
 def test_all_excludes_code_execution():
     policy = resolve_tool_policy("all", "http")
     assert "execute_typescript" not in policy.allowed

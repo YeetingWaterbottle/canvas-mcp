@@ -2458,7 +2458,8 @@ class TestRound11Surfaces:
             {
                 "STUDENT_WRITE_TOOLS": (
                     "submit_assignment,comment_on_my_submission,"
-                    "create_my_calendar_event"
+                    "create_my_calendar_event,update_my_calendar_event,"
+                    "delete_my_calendar_event"
                 )
             },
         ):
@@ -2519,6 +2520,49 @@ class TestRound11Surfaces:
             )
         mock_req.assert_not_called()
         mock_list.assert_not_called()
+        assert result.startswith("Error")
+
+    @pytest.mark.asyncio
+    async def test_update_my_calendar_event_rejects_fenced_text(self):
+        personal = {
+            "id": 9,
+            "context_code": "user_123",
+            "title": "Old",
+            "start_at": "2026-10-04T23:59:00-07:00",
+            "all_day": False,
+        }
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=AsyncMock(return_value=("user_123", personal, None)),
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as mock_req:
+            tool = self._student_tool("update_my_calendar_event")
+            assert tool is not None
+            result = await tool(9, description=self.FENCED)
+        mock_req.assert_not_called()
+        assert result.startswith("Error")
+
+    @pytest.mark.asyncio
+    async def test_delete_my_calendar_event_rejects_fenced_reason(self):
+        personal = {
+            "id": 9,
+            "context_code": "user_123",
+            "title": "Old",
+            "start_at": "2026-10-04T23:59:00-07:00",
+        }
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=AsyncMock(return_value=("user_123", personal, None)),
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as mock_req:
+            tool = self._student_tool("delete_my_calendar_event")
+            assert tool is not None
+            result = await tool(9, cancel_reason=self.FENCED)
+        mock_req.assert_not_called()
         assert result.startswith("Error")
 
     @pytest.mark.asyncio
