@@ -28,9 +28,9 @@ Reduce tool overhead by setting a role-based profile. Only tools relevant to the
 
 ```
 # In .env:
-CANVAS_ROLE=student    # ~37 tools (student + shared)
+CANVAS_ROLE=student    # 38 tools by default; up to 42 with all student writes enabled
 CANVAS_ROLE=educator   # 92 tools (educator + shared)
-CANVAS_ROLE=all        # Default profile; 98 tools by default, 103 with all feature-gated tools enabled
+CANVAS_ROLE=all        # Default profile; 99 tools by default, 105 with all feature-gated tools enabled
 ```
 
 Or via CLI flag: `canvas-mcp-server --role student` (CLI flag takes precedence over env var).
@@ -59,15 +59,17 @@ instructor can still block them in their own course.
 | `submit_assignment` | Submit your own assignment (text, URL, or any file type) |
 | `comment_on_my_submission` | Comment on your own submission |
 | `mark_module_item_done` | Mark a module item done for yourself |
+| `create_my_calendar_event` | Create an event on your own personal Canvas calendar |
 
 Three things to know before using them:
 
 1. **They may not exist.** Operators enable them individually via
    `STUDENT_WRITE_TOOLS`, which defaults to empty. A disabled tool is absent
    from the tool list entirely, so treat its absence as normal.
-2. **An instructor can turn them off per course.** If a write comes back blocked,
+2. **An instructor can turn course-scoped student writes off per course.** If a write comes back blocked,
    that is the course's stated policy. Relay the reason to the student and do not
-   look for a way around it.
+   look for a way around it. Personal calendar events are not course-scoped and
+   therefore do not consult an instructor course policy.
 3. **`submit_assignment` is two calls.** The first returns a preview and a
    confirmation token, and submits nothing. **Show the preview to the student and
    get their answer** before calling again with the token. The token is

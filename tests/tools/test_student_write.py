@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 
 from canvas_mcp.core.config import reset_config
 from canvas_mcp.core.course_policy import reset_policy_cache
+from canvas_mcp.core.write_outcome import RequestFailure, WriteOutcome
 from canvas_mcp.tools.student_write import (
     register_student_write_tools,
     reset_pending_confirmations,
@@ -83,6 +84,7 @@ class TestOperatorCeiling:
         assert "submit_assignment" not in tools
         assert "comment_on_my_submission" not in tools
         assert "mark_module_item_done" not in tools
+        assert "create_my_calendar_event" not in tools
 
     def test_read_tool_always_registered(self):
         tools = get_tools(STUDENT_WRITE_TOOLS="")
@@ -92,6 +94,7 @@ class TestOperatorCeiling:
         tools = get_tools(STUDENT_WRITE_TOOLS="submit_assignment")
         assert "submit_assignment" in tools
         assert "comment_on_my_submission" not in tools
+        assert "create_my_calendar_event" not in tools
 
     def test_accepts_comma_and_space_separated(self):
         tools = get_tools(
@@ -102,6 +105,11 @@ class TestOperatorCeiling:
 
     def test_unknown_names_do_not_register_anything(self):
         tools = get_tools(STUDENT_WRITE_TOOLS="take_quiz_for_me")
+        assert "submit_assignment" not in tools
+
+    def test_calendar_tool_registers_only_when_named(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+        assert "create_my_calendar_event" in tools
         assert "submit_assignment" not in tools
 
 
@@ -133,6 +141,220 @@ def make_responder(assignment, submission=None, submit_result=None, upload=None)
 
     responder.posts = posts
     return responder
+
+
+class TestPersonalCalendarEvent:
+    """The calendar writer is narrow, self-scoped, and safe to resync."""
+
+    @pytest.mark.asyncio
+    async def test_creates_only_on_authenticated_users_personal_calendar(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+        calls = []
+
+        async def responder(method, endpoint, **kwargs):
+            calls.append((method, endpoint, kwargs))
+            if method == "get" and endpoint == "/users/self/profile":
+                return {"id": 123, "name": "Student"}
+            if method == "post" and endpoint == "/calendar_events":
+                return {
+                    "id": 77,
+                    "context_code": "user_123",
+                    "title": "CSE 110 — Vision due",
+                    "start_at": "2026-10-06T06:59:00Z",
+                }
+            if method == "get" and endpoint == "/calendar_events/77":
+                return {
+                    "id": 77,
+                    "context_code": "user_123",
+                    "title": "CSE 110 — Vision due",
+                    "start_at": "2026-10-06T06:59:00Z",
+                }
+            raise AssertionError(f"Unexpected request: {method} {endpoint}")
+
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            request.side_effect = responder
+            fetch_all.return_value = []
+            result = await tools["create_my_calendar_event"](
+                title="CSE 110 — Vision due",
+                start_at="2026-10-05T23:59:00-07:00",
+                description="Team Vision deadline",
+            )
+
+        assert "Personal Canvas calendar event created" in result
+        post = next(call for call in calls if call[0] == "post")
+        assert post[1] == "/calendar_events"
+        assert post[2]["use_form_data"] is True
+        assert post[2]["data"]["calendar_event[context_code]"] == "user_123"
+        assert post[2]["data"]["calendar_event[title]"] == "CSE 110 — Vision due"
+        assert "course_" not in str(post[2]["data"])
+
+    @pytest.mark.asyncio
+    async def test_exact_repeat_is_not_created_again(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+
+        async def responder(method, endpoint, **kwargs):
+            if method == "get" and endpoint == "/users/self/profile":
+                return {"id": 123}
+            if method == "post":
+                raise AssertionError("duplicate event should not be posted")
+            raise AssertionError(f"Unexpected request: {method} {endpoint}")
+
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            request.side_effect = responder
+            fetch_all.return_value = [
+                {
+                    "id": 77,
+                    "context_code": "user_123",
+                    "title": "COGS 108 — Quiz 1 due",
+                    "start_at": "2026-10-05T06:59:00Z",
+                }
+            ]
+            result = await tools["create_my_calendar_event"](
+                title="COGS 108 — Quiz 1 due",
+                start_at="2026-10-04T23:59:00-07:00",
+            )
+
+        assert "already exists" in result
+        assert "nothing was created" in result
+
+    @pytest.mark.asyncio
+    async def test_rejects_timezone_free_timestamp_before_any_api_call(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            result = await tools["create_my_calendar_event"](
+                title="Deadline",
+                start_at="2026-10-04T23:59:00",
+            )
+
+        assert "timezone offset" in result
+        request.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_refuses_to_write_if_duplicate_check_fails(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+
+        async def responder(method, endpoint, **kwargs):
+            if method == "get" and endpoint == "/users/self/profile":
+                return {"id": 123}
+            if method == "post":
+                raise AssertionError("must fail closed before POST")
+            raise AssertionError(f"Unexpected request: {method} {endpoint}")
+
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            request.side_effect = responder
+            fetch_all.return_value = {"error": "temporary Canvas failure"}
+            result = await tools["create_my_calendar_event"](
+                title="Deadline",
+                start_at="2026-10-04T23:59:00-07:00",
+            )
+
+        assert "no event was created" in result
+
+    @pytest.mark.asyncio
+    async def test_uncertain_post_result_warns_before_retry(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+
+        async def responder(method, endpoint, **kwargs):
+            if method == "get" and endpoint == "/users/self/profile":
+                return {"id": 123}
+            if method == "post" and endpoint == "/calendar_events":
+                return RequestFailure("request timed out", WriteOutcome.MAY_HAVE_WRITTEN)
+            raise AssertionError(f"Unexpected request: {method} {endpoint}")
+
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            request.side_effect = responder
+            fetch_all.return_value = []
+            result = await tools["create_my_calendar_event"](
+                title="Deadline",
+                start_at="2026-10-04T23:59:00-07:00",
+            )
+
+        assert "Check your Canvas calendar before retrying" in result
+
+    @pytest.mark.asyncio
+    async def test_all_day_duplicate_matches_canvas_all_day_date(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+
+        async def responder(method, endpoint, **kwargs):
+            if method == "get" and endpoint == "/users/self/profile":
+                return {"id": 123}
+            if method == "post":
+                raise AssertionError("duplicate all-day event should not be posted")
+            raise AssertionError(f"Unexpected request: {method} {endpoint}")
+
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            request.side_effect = responder
+            fetch_all.return_value = [
+                {
+                    "id": 88,
+                    "context_code": "user_123",
+                    "title": "VIS 41 — Critique week",
+                    "all_day": True,
+                    "all_day_date": "2026-10-06",
+                    "start_at": "2026-10-06T00:00:00Z",
+                }
+            ]
+            result = await tools["create_my_calendar_event"](
+                title="VIS 41 — Critique week",
+                start_at="2026-10-06T00:00:00-07:00",
+                all_day=True,
+            )
+
+        assert "already exists" in result
+
+    @pytest.mark.asyncio
+    async def test_all_day_event_rejects_end_at_before_any_api_call(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as fetch_all:
+            result = await tools["create_my_calendar_event"](
+                title="VIS 41 — Critique week",
+                start_at="2026-10-06T00:00:00-07:00",
+                end_at="2026-10-07T00:00:00-07:00",
+                all_day=True,
+            )
+
+        assert "end_at is not supported when all_day=true" in result
+        request.assert_not_awaited()
+        fetch_all.assert_not_awaited()
 
 
 def _mock_assignment(**overrides):

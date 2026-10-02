@@ -122,6 +122,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "bulk_grade_submissions": Effect.CANVAS_WRITE,
     "bulk_update_pages": Effect.CANVAS_WRITE,
     "comment_on_my_submission": Effect.CANVAS_WRITE,
+    "create_my_calendar_event": Effect.CANVAS_WRITE,
     "create_announcement": Effect.CANVAS_WRITE,
     "create_assignment": Effect.CANVAS_WRITE,
     "create_content_migration": Effect.CANVAS_WRITE,

@@ -25,6 +25,7 @@ STUDENT_WRITE_TOOL_NAMES = frozenset({
     "submit_assignment",
     "comment_on_my_submission",
     "mark_module_item_done",
+    "create_my_calendar_event",
 })
 
 

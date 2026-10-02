@@ -27,7 +27,7 @@
     {
       "id": "student_write",
       "name": "Student Write Tools",
-      "description": "Tools that act on Canvas for the student. Off by default: enabled per-tool by the operator via STUDENT_WRITE_TOOLS, and further restrictable per course by an instructor."
+      "description": "Tools that act on Canvas for the student. Off by default: enabled per-tool by the operator via STUDENT_WRITE_TOOLS. Course-scoped writes are further restrictable per course by an instructor; personal-calendar writes are self-scoped."
     }
   ],
   "tools": [
@@ -1149,6 +1149,67 @@
         "Mark the week 3 reading as done"
       ],
       "notes": "Disabled unless the operator lists it in STUDENT_WRITE_TOOLS."
+    },
+    {
+      "name": "create_my_calendar_event",
+      "category": "student_write",
+      "description": "Create an event on your own personal Canvas calendar",
+      "parameters": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "description": "Short event title"
+        },
+        {
+          "name": "start_at",
+          "type": "string",
+          "required": true,
+          "description": "Offset-aware ISO-8601 start datetime"
+        },
+        {
+          "name": "end_at",
+          "type": "string",
+          "required": false,
+          "description": "Optional offset-aware ISO-8601 end datetime"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Optional event description; Canvas accepts HTML"
+        },
+        {
+          "name": "all_day",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Whether Canvas should display the event as all-day"
+        },
+        {
+          "name": "location_name",
+          "type": "string",
+          "required": false,
+          "description": "Optional location label"
+        },
+        {
+          "name": "location_address",
+          "type": "string",
+          "required": false,
+          "description": "Optional location address"
+        },
+        {
+          "name": "time_zone_edited",
+          "type": "string",
+          "required": false,
+          "description": "Optional IANA or Rails timezone name recorded by Canvas"
+        }
+      ],
+      "returns": "Verified event ID and start time, or an already-exists result for an exact title/start match",
+      "examples": [
+        "Add CSE 110 — Prototyping response due to my Canvas calendar for Oct 2 at 4 PM Pacific"
+      ],
+      "notes": "Disabled unless the operator lists it in STUDENT_WRITE_TOOLS. Always targets the authenticated user's personal calendar; callers cannot choose a course, group, account, or another user's calendar."
     },
     {
       "name": "list_code_api_modules",

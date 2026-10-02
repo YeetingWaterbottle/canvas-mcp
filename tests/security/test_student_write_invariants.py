@@ -24,12 +24,24 @@ from canvas_mcp.tools.student_write import (
     reset_pending_confirmations,
 )
 
-ALL_WRITE_TOOLS = "submit_assignment,comment_on_my_submission,mark_module_item_done"
+ALL_WRITE_TOOLS = (
+    "submit_assignment,comment_on_my_submission,mark_module_item_done,"
+    "create_my_calendar_event"
+)
 
 # Any parameter that could let a caller name someone other than themselves.
 IDENTITY_PARAMS = {
     "user_id", "as_user_id", "student_id", "assessor_id",
     "user", "student", "on_behalf_of", "group_id",
+}
+
+CALENDAR_TARGET_PARAMS = {
+    "context_code",
+    "course_identifier",
+    "course_id",
+    "user_id",
+    "group_id",
+    "account_id",
 }
 
 
@@ -74,6 +86,15 @@ class TestNoIdentityOverride:
             params = set(inspect.signature(fn).parameters)
             offending = params & IDENTITY_PARAMS
             assert not offending, f"{name} exposes identity parameter(s): {offending}"
+
+    def test_calendar_tool_exposes_no_target_selector(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="create_my_calendar_event")
+        params = set(inspect.signature(tools["create_my_calendar_event"]).parameters)
+        offending = params & CALENDAR_TARGET_PARAMS
+        assert not offending, (
+            "create_my_calendar_event must remain personal-calendar-only; "
+            f"target selector(s) exposed: {sorted(offending)}"
+        )
 
     @pytest.mark.parametrize(
         "field",

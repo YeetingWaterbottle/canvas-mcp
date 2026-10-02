@@ -123,8 +123,9 @@ grade if any, and submission comments.
 ### Student Write Tools
 
 > **Off by default.** These tools only exist if the server operator enabled them
-> via `STUDENT_WRITE_TOOLS`, and an instructor can additionally block them in
-> their own course. See [Student write configuration](#student-write-configuration).
+> via `STUDENT_WRITE_TOOLS`. Course-scoped writes can additionally be blocked by
+> an instructor in their own course. Personal-calendar writes are self-scoped and
+> do not consult course policy. See [Student write configuration](#student-write-configuration).
 
 #### `submit_assignment`
 Submit one of your own assignments. **Consumes an attempt.**
@@ -190,6 +191,30 @@ requirements.
 
 ---
 
+#### `create_my_calendar_event`
+Create an event on the authenticated student's **personal Canvas calendar**.
+The caller cannot choose a course, group, account, or another user's calendar;
+the tool derives `user_<id>` from `/users/self/profile`.
+
+Matching title/start events are detected before writing, so a deadline-sync job
+can be rerun without creating duplicate events.
+
+**Parameters:**
+- `title` (required): Short event title
+- `start_at` (required): Offset-aware ISO-8601 datetime, e.g. `2026-10-02T16:00:00-07:00`
+- `end_at` (optional): Offset-aware ISO-8601 end datetime for timed events; omit
+  it when `all_day=true`
+- `description` (optional): Event description; Canvas accepts HTML
+- `all_day` (optional, default `false`): Display as an all-day event
+- `location_name` (optional): Location label
+- `location_address` (optional): Location address
+- `time_zone_edited` (optional): IANA or Rails timezone name recorded by Canvas
+
+**Returns:** The created event ID after a follow-up verification read, or an
+"already exists" result if an exact matching event is present.
+
+---
+
 #### Tools that change anything: `ALLOWED_WRITE_TOOLS`
 
 Read tools are always available. Every tool that changes something (a Canvas
@@ -227,10 +252,10 @@ Comma- or space-separated tool names. Empty (the default) means no student write
 tool is registered at all.
 
 ```bash
-STUDENT_WRITE_TOOLS=submit_assignment,comment_on_my_submission
+STUDENT_WRITE_TOOLS=submit_assignment,comment_on_my_submission,create_my_calendar_event
 ```
 
-**2. Per-course instructor policy**
+**2. Per-course instructor policy (course-scoped writes only)**
 
 An instructor states their course's stance in the course syllabus (the default
 carrier, because students cannot edit it):
@@ -260,6 +285,10 @@ breath. Authorship cannot be established from a student's own token.
 Anything ambiguous denies: a malformed policy, contradictory directives (an
 `agent_writes: deny` appended under an earlier `allow`), a failed read, or a
 course this caller cannot see.
+
+`create_my_calendar_event` is intentionally outside that course-policy layer:
+it can write only to the authenticated user's personal calendar and cannot target
+a course calendar.
 
 ---
 

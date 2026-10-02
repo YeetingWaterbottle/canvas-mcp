@@ -2453,7 +2453,15 @@ class TestRound11Surfaces:
         from unittest.mock import patch as _patch
 
         # Student write tools register only when named in STUDENT_WRITE_TOOLS.
-        with _patch.dict(os.environ, {"STUDENT_WRITE_TOOLS": "submit_assignment,comment_on_my_submission"}):
+        with _patch.dict(
+            os.environ,
+            {
+                "STUDENT_WRITE_TOOLS": (
+                    "submit_assignment,comment_on_my_submission,"
+                    "create_my_calendar_event"
+                )
+            },
+        ):
             import canvas_mcp.core.config as cfg
             cfg._config = None
             try:
@@ -2492,6 +2500,25 @@ class TestRound11Surfaces:
             assert tool is not None
             result = await tool("CS101", 5, self.FENCED)
         mock_req.assert_not_called()
+        assert result.startswith("Error")
+
+    @pytest.mark.asyncio
+    async def test_create_my_calendar_event_rejects_fenced_text(self):
+        with patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as mock_req, patch(
+            "canvas_mcp.tools.student_write.fetch_all_paginated_results",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            tool = self._student_tool("create_my_calendar_event")
+            assert tool is not None
+            result = await tool(
+                self.FENCED,
+                "2026-10-04T23:59:00-07:00",
+            )
+        mock_req.assert_not_called()
+        mock_list.assert_not_called()
         assert result.startswith("Error")
 
     @pytest.mark.asyncio

@@ -12,9 +12,11 @@ behalf rather than only read. Four properties are load-bearing:
    is sent (``assert_no_identity_override``).
 2. **Operator ceiling.** A tool absent from ``STUDENT_WRITE_TOOLS`` is never
    registered, so it never enters the MCP tool list. The default is empty.
-3. **Instructor agency.** Within that ceiling, a per-course policy can further
-   restrict writes, and it is re-checked immediately before the write itself,
-   not merely during the preview. See ``core/course_policy.py``.
+3. **Instructor agency for course-scoped writes.** Within that ceiling, a
+   per-course policy can further restrict writes, and it is re-checked immediately
+   before the write itself, not merely during the preview. The personal-calendar
+   writer is self-scoped instead and never targets a course calendar. See
+   ``core/course_policy.py``.
 4. **Confirmation bound to content.** ``submit_assignment`` will not submit on
    a bare boolean. The preview issues a short-lived, single-use token bound to
    the target, the payload hash and the observed attempt number, so an agent
@@ -34,13 +36,18 @@ import hashlib
 import os
 import tempfile
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..core.cache import get_course_id
-from ..core.client import make_canvas_request, upload_file_to_storage
+from ..core.client import (
+    fetch_all_paginated_results,
+    make_canvas_request,
+    upload_file_to_storage,
+)
 from ..core.config import get_config
 from ..core.course_policy import (
     assert_no_identity_override,
@@ -61,6 +68,7 @@ from ..core.untrusted_content import (
 )
 from ..core.validation import coerce_canvas_id, validate_params
 from ..core.write_confirmation import ConfirmationGuard, unconfirmed_write_warning
+from ..core.write_outcome import RequestFailure, WriteOutcome
 
 # Submission types this tool supports. Quiz and discussion types are absent by
 # design: quiz-taking is a separate academic-integrity decision behind its own
@@ -74,6 +82,47 @@ _INVALID_ASSIGNMENT_ID = (
     "Error: assignment_id must be a numeric Canvas assignment ID. "
     "Use list_assignments to find it."
 )
+
+
+def _parse_event_datetime(value: str, field_name: str) -> tuple[str | None, datetime | None, str | None]:
+    """Validate an offset-aware ISO-8601 event timestamp.
+
+    Canvas accepts ISO-8601 datetimes. Requiring an explicit UTC offset avoids
+    silently interpreting a school deadline in the server's local timezone.
+    """
+    raw = value.strip()
+    if not raw:
+        return None, None, f"Error: {field_name} cannot be empty"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return (
+            None,
+            None,
+            f"Error: {field_name} must be an ISO-8601 datetime, for example "
+            "2026-10-02T16:00:00-07:00",
+        )
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return (
+            None,
+            None,
+            f"Error: {field_name} must include a timezone offset, for example "
+            "2026-10-02T16:00:00-07:00",
+        )
+    return parsed.isoformat(), parsed, None
+
+
+def _same_event_instant(left: Any, right: datetime) -> bool:
+    """Compare Canvas-returned ISO timestamps by absolute instant."""
+    if not isinstance(left, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(left.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return False
+    return parsed.timestamp() == right.timestamp()
 
 # Whole-request upload bounds. These exist on top of the per-file limit in
 # core/file_validation, which on its own would allow an unlimited number of
@@ -1039,3 +1088,211 @@ def register_student_write_tools(mcp: FastMCP) -> None:
                 )
 
             return "✅ Module item marked done."
+
+    if "create_my_calendar_event" in enabled:
+
+        @mcp.tool(annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False))
+        @validate_params
+        async def create_my_calendar_event(
+            title: str,
+            start_at: str,
+            end_at: str | None = None,
+            description: str | None = None,
+            all_day: bool = False,
+            location_name: str | None = None,
+            location_address: str | None = None,
+            time_zone_edited: str | None = None,
+        ) -> str:
+            """Create an event on YOUR OWN personal Canvas calendar.
+
+            The calendar context is derived from the authenticated Canvas user;
+            callers cannot choose a course, group, account, or another user's
+            calendar. Matching title/start events are detected before writing so
+            semester-sync workflows can be rerun without duplicating the same
+            deadline event.
+
+            Args:
+                title: Short event title
+                start_at: Offset-aware ISO-8601 start time
+                end_at: Optional offset-aware ISO-8601 end time
+                description: Optional event description (Canvas accepts HTML)
+                all_day: Whether Canvas should display the event as all-day
+                location_name: Optional location label
+                location_address: Optional street/location address
+                time_zone_edited: Optional IANA/Rails timezone name recorded by Canvas
+            """
+            title = title.strip()
+            if not title:
+                return "Error: title cannot be empty"
+            if len(title) > 255:
+                return "Error: title cannot exceed 255 characters"
+
+            text_fields = (
+                title,
+                description,
+                location_name,
+                location_address,
+                time_zone_edited,
+            )
+            if any(value and contains_fence_markers(value) for value in text_fields):
+                return FENCE_LEAK_ERROR
+
+            normalized_start, start_dt, start_error = _parse_event_datetime(
+                start_at, "start_at"
+            )
+            if start_error:
+                return start_error
+            assert normalized_start is not None and start_dt is not None
+
+            normalized_end: str | None = None
+            end_dt: datetime | None = None
+            if all_day and end_at is not None:
+                return (
+                    "Error: end_at is not supported when all_day=true. "
+                    "Create a single-day all-day event without end_at."
+                )
+            if end_at is not None:
+                normalized_end, end_dt, end_error = _parse_event_datetime(
+                    end_at, "end_at"
+                )
+                if end_error:
+                    return end_error
+                assert end_dt is not None
+                if end_dt.timestamp() < start_dt.timestamp():
+                    return "Error: end_at cannot be earlier than start_at"
+
+            profile = await make_canvas_request("get", "/users/self/profile")
+            if not isinstance(profile, dict) or "error" in profile:
+                detail = profile.get("error") if isinstance(profile, dict) else profile
+                return f"❌ Could not read your Canvas profile: {detail}"
+            raw_user_id = profile.get("id")
+            if not isinstance(raw_user_id, (str, int)):
+                return "❌ Canvas returned no usable user ID; no calendar event was created."
+            user_id = coerce_canvas_id(raw_user_id)
+            if user_id is None:
+                return "❌ Canvas returned no usable user ID; no calendar event was created."
+            context_code = f"user_{user_id}"
+
+            # Make repeat syncs safe. We look only at the caller's own calendar on
+            # the relevant date and refuse a matching title/start event. If an end
+            # time was supplied for a timed event, it must match too.
+            window_end = end_dt or start_dt
+            existing = await fetch_all_paginated_results(
+                "/calendar_events",
+                params={
+                    "type": "event",
+                    # Canvas may normalize an offset-aware late-night deadline to
+                    # the next UTC date. Search one day on either side so that a
+                    # repeat still finds the event after that normalization.
+                    "start_date": (start_dt - timedelta(days=1)).date().isoformat(),
+                    "end_date": (window_end + timedelta(days=1)).date().isoformat(),
+                    "context_codes[]": [context_code],
+                },
+            )
+            if isinstance(existing, dict) and "error" in existing:
+                return (
+                    "❌ Could not check your existing calendar events, so no event "
+                    f"was created: {existing['error']}"
+                )
+            if isinstance(existing, list):
+                for event in existing:
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("context_code") != context_code:
+                        continue
+                    if event.get("title") != title:
+                        continue
+                    if all_day:
+                        if event.get("all_day") is not True:
+                            continue
+                        if event.get("all_day_date") != start_dt.date().isoformat():
+                            continue
+                    elif not _same_event_instant(event.get("start_at"), start_dt):
+                        continue
+                    if end_dt is not None and not _same_event_instant(
+                        event.get("end_at"), end_dt
+                    ):
+                        continue
+                    event_id = event.get("id", "unknown")
+                    return (
+                        "✅ Matching personal calendar event already exists; nothing "
+                        f"was created.\nEvent ID: {event_id}\nStart: {normalized_start}"
+                    )
+
+            data: dict[str, Any] = {
+                "calendar_event[context_code]": context_code,
+                "calendar_event[title]": title,
+                "calendar_event[start_at]": normalized_start,
+                "calendar_event[all_day]": all_day,
+            }
+            if normalized_end is not None:
+                data["calendar_event[end_at]"] = normalized_end
+            if description is not None:
+                data["calendar_event[description]"] = description
+            if location_name is not None:
+                data["calendar_event[location_name]"] = location_name
+            if location_address is not None:
+                data["calendar_event[location_address]"] = location_address
+            if time_zone_edited is not None:
+                data["calendar_event[time_zone_edited]"] = time_zone_edited
+
+            response = await make_canvas_request(
+                "post", "/calendar_events", data=data, use_form_data=True
+            )
+            if isinstance(response, RequestFailure):
+                if response.outcome is WriteOutcome.MAY_HAVE_WRITTEN:
+                    return unconfirmed_write_warning(
+                        "the personal calendar event was created",
+                        {"Title": title, "Start": normalized_start},
+                        "Canvas did not provide a reliable response after the write may "
+                        "have reached the server. Check your Canvas calendar before "
+                        "retrying to avoid a duplicate.",
+                    )
+                return f"❌ Calendar event creation failed: {response['error']}"
+            if not isinstance(response, dict) or "error" in response:
+                detail = response.get("error") if isinstance(response, dict) else response
+                return f"❌ Calendar event creation failed: {detail}"
+
+            raw_event_id = response.get("id")
+            event_id = (
+                coerce_canvas_id(raw_event_id)
+                if isinstance(raw_event_id, (str, int))
+                else None
+            )
+            if event_id is None:
+                return unconfirmed_write_warning(
+                    "the personal calendar event was created",
+                    {"Title": title, "Start": normalized_start},
+                    "Canvas accepted the request but returned no event ID. Check your "
+                    "Canvas calendar before retrying to avoid a duplicate.",
+                )
+
+            # Verify the created event is truly on the authenticated user's
+            # personal calendar before claiming success.
+            after = await make_canvas_request("get", f"/calendar_events/{event_id}")
+            confirmed_time = (
+                after.get("all_day") is True
+                and after.get("all_day_date") == start_dt.date().isoformat()
+                if isinstance(after, dict) and all_day
+                else isinstance(after, dict)
+                and _same_event_instant(after.get("start_at"), start_dt)
+            )
+            confirmed = (
+                isinstance(after, dict)
+                and "error" not in after
+                and after.get("context_code") == context_code
+                and after.get("title") == title
+                and confirmed_time
+            )
+            if not confirmed:
+                return unconfirmed_write_warning(
+                    "the personal calendar event was created",
+                    {"Event ID": event_id, "Title": title, "Start": normalized_start},
+                    "Canvas returned an event ID, but the follow-up read did not "
+                    "confirm the expected personal-calendar event. Check Canvas before retrying.",
+                )
+
+            return (
+                "✅ Personal Canvas calendar event created.\n"
+                f"Event ID: {event_id}\nTitle: {title}\nStart: {normalized_start}"
+            )
