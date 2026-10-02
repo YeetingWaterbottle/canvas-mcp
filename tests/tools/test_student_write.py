@@ -488,6 +488,45 @@ class TestPersonalCalendarCrud:
         request.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_update_clear_end_accepts_canvas_zero_duration_normalization(self):
+        tools = get_tools(STUDENT_WRITE_TOOLS="update_my_calendar_event")
+        before = {
+            "id": 9,
+            "context_code": "user_123",
+            "title": "Deadline",
+            "start_at": "2026-10-07T07:00:00Z",
+            "end_at": "2026-10-07T07:00:00Z",
+            "all_day": True,
+        }
+        after = {
+            **before,
+            "start_at": "2026-10-07T23:00:00Z",
+            "end_at": "2026-10-07T23:00:00Z",
+            "all_day": False,
+        }
+        reads = AsyncMock(
+            side_effect=[("user_123", before, None), ("user_123", after, None)]
+        )
+        with patch(
+            "canvas_mcp.tools.student_write._get_my_calendar_event_record",
+            new=reads,
+        ), patch(
+            "canvas_mcp.tools.student_write.make_canvas_request",
+            new_callable=AsyncMock,
+        ) as request:
+            request.return_value = after
+            result = await tools["update_my_calendar_event"](
+                9,
+                start_at="2026-10-07T16:00:00-07:00",
+                all_day=False,
+                clear_end_at=True,
+            )
+
+        assert "✅ Personal Canvas calendar event updated" in result
+        data = request.await_args.kwargs["data"]
+        assert data["calendar_event[end_at]"] == ""
+
+    @pytest.mark.asyncio
     async def test_delete_never_deletes_series_or_other_calendar(self):
         tools = get_tools(STUDENT_WRITE_TOOLS="delete_my_calendar_event")
         before = {

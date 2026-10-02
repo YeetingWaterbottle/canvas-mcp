@@ -1673,7 +1673,21 @@ def register_student_write_tools(mcp: FastMCP) -> None:
             if end_dt is not None:
                 checks.append(_same_event_instant(after.get("end_at"), end_dt))
             if clear_end_at or all_day is True:
-                checks.append(not after.get("end_at"))
+                # Canvas may normalize a cleared end time on a zero-duration
+                # event back to the same instant as start_at. Treat either a
+                # missing end or end==start as a successful clear.
+                after_start_dt: datetime | None = None
+                if isinstance(after.get("start_at"), str):
+                    _, after_start_dt, _ = _parse_event_datetime(
+                        str(after["start_at"]), "after start_at"
+                    )
+                checks.append(
+                    not after.get("end_at")
+                    or (
+                        after_start_dt is not None
+                        and _same_event_instant(after.get("end_at"), after_start_dt)
+                    )
+                )
             if description is not None:
                 checks.append(str(after.get("description") or "") == description)
             if location_name is not None:
