@@ -51,6 +51,7 @@ from .tools import (
     register_educator_module_tools,
     register_educator_page_crud_tools,
     register_enrollment_tools,
+    register_media_gallery_tools,
     register_page_tools,
     register_peer_review_comment_tools,
     register_peer_review_tools,
@@ -442,6 +443,7 @@ def register_all_tools(mcp: FastMCP, role: str = "all") -> None:
     register_shared_module_tools(mcp)
     register_shared_file_tools(mcp)
     register_shared_messaging_tools(mcp)
+    register_media_gallery_tools(mcp)
     register_discovery_tools(mcp)
     # Caller-scoped identity: needs no roster permission, so every profile gets it.
     register_self_identity_tools(mcp)
@@ -583,7 +585,7 @@ def main() -> None:
         "--role",
         choices=["student", "educator", "all"],
         default=None,
-        help="Tool profile: student (~37 tools), educator (~88 tools), all (default: all)"
+        help="Tool profile: student (~42 tools), educator (~95 tools), all (default: all)"
     )
     parser.add_argument(
         "--list-grants",

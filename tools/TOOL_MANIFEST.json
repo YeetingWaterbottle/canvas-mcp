@@ -62,6 +62,83 @@
       ]
     },
     {
+      "name": "list_course_media",
+      "category": "shared",
+      "description": "List recordings in a course Kaltura Media Gallery using Canvas LTI authentication",
+      "parameters": [
+        {
+          "name": "course_id",
+          "type": "integer",
+          "required": true,
+          "description": "Canvas course ID"
+        },
+        {
+          "name": "external_tool_id",
+          "type": "integer",
+          "required": false,
+          "default": 5826,
+          "description": "Canvas external-tool ID for Kaltura Media Gallery (5826 at UCSD)"
+        },
+        {
+          "name": "max_entries",
+          "type": "integer",
+          "required": false,
+          "default": 100,
+          "description": "Maximum recordings to return (1-500)"
+        }
+      ],
+      "returns": "Kaltura gallery ID and recording entry IDs, titles, and durations",
+      "examples": [
+        "List the recordings in Canvas course 78014",
+        "Show the Kaltura Media Gallery entries for this course"
+      ]
+    },
+    {
+      "name": "get_media_transcript",
+      "category": "shared",
+      "description": "Fetch one Kaltura Media Gallery transcript through the caller's Canvas-authenticated LTI session",
+      "parameters": [
+        {
+          "name": "course_id",
+          "type": "integer",
+          "required": true,
+          "description": "Canvas course ID"
+        },
+        {
+          "name": "entry_id",
+          "type": "string",
+          "required": true,
+          "description": "Kaltura media entry ID returned by list_course_media"
+        },
+        {
+          "name": "external_tool_id",
+          "type": "integer",
+          "required": false,
+          "default": 5826,
+          "description": "Canvas external-tool ID for Kaltura Media Gallery (5826 at UCSD)"
+        },
+        {
+          "name": "language_code",
+          "type": "string",
+          "required": false,
+          "default": "en",
+          "description": "Preferred caption language code"
+        },
+        {
+          "name": "include_timestamps",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Return WebVTT with timestamps instead of plain transcript text"
+        }
+      ],
+      "returns": "Fenced transcript text plus Kaltura entry/caption metadata; temporary playback credentials are never returned",
+      "examples": [
+        "Get the transcript for Kaltura entry 1_abc123 in Canvas course 78014",
+        "Fetch the latest lecture transcript with timestamps"
+      ]
+    },
+    {
       "name": "get_my_upcoming_assignments",
       "category": "student",
       "description": "Get your upcoming assignments across all courses",

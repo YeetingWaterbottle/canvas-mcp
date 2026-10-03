@@ -100,6 +100,7 @@ READ_TOOL_CONTENT_POLICIES: dict[str, ReadToolContentPolicy] = {
     "get_my_submission_status": _fenced("fence_untrusted_inline"),
     "get_my_todo_items": _fenced("fence_untrusted_inline"),
     "get_my_upcoming_assignments": _fenced("fence_untrusted_inline"),
+    "get_media_transcript": _fenced("fence_untrusted"),
     "get_page_content": _fenced("fence_untrusted"),
     "get_page_details": _fenced("fence_untrusted"),
     "get_peer_review_assignments": _fenced("_fence_peer_review_names"),
@@ -124,6 +125,7 @@ READ_TOOL_CONTENT_POLICIES: dict[str, ReadToolContentPolicy] = {
     "list_courses": _deferred(
         "Returns course name/code and the caller's role; course identity is the documented low-risk exception."
     ),
+    "list_course_media": _fenced("fence_untrusted_inline"),
     "list_discussion_entries": _fenced("fence_untrusted"),
     "list_discussion_topics": _fenced("fence_untrusted"),
     "list_group_discussion_topics": _fenced("fence_untrusted"),

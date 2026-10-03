@@ -28,9 +28,9 @@ Reduce tool overhead by setting a role-based profile. Only tools relevant to the
 
 ```
 # In .env:
-CANVAS_ROLE=student    # 40 tools by default; up to 46 with all student writes enabled
-CANVAS_ROLE=educator   # 92 tools (educator + shared)
-CANVAS_ROLE=all        # Default profile; 101 tools by default, 109 with all feature-gated tools enabled
+CANVAS_ROLE=student    # 42 tools by default; up to 48 with all student writes enabled
+CANVAS_ROLE=educator   # 95 tools (educator + shared)
+CANVAS_ROLE=all        # Default profile; 103 tools by default, 111 with all feature-gated tools enabled
 ```
 
 Or via CLI flag: `canvas-mcp-server --role student` (CLI flag takes precedence over env var).
@@ -147,6 +147,8 @@ Content access tools available to all authenticated users.
 |------|---------|
 | `get_my_profile` | Who am I? Your own Canvas user ID, name, login ID |
 | `get_my_enrollments` | What am I enrolled in, and as what role? Needs no roster permission |
+| `list_course_media` | List recordings in a Kaltura Media Gallery through Canvas LTI |
+| `get_media_transcript` | Fetch one Media Gallery recording's transcript without separate Kaltura credentials |
 | `list_courses` | Enrolled courses (includes your own role in each) |
 | `get_course_details` | Course info and syllabus (includes your own role) |
 | `get_syllabus` | Full Syllabus tab content, untruncated (text/html/both). Educators write it with `update_syllabus` |

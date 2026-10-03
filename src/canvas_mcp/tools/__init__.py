@@ -20,6 +20,7 @@ from .discussions import (
 )
 from .enrollment import register_enrollment_tools
 from .files import register_educator_file_tools, register_shared_file_tools
+from .media_gallery import register_media_gallery_tools
 from .messaging import (
     register_educator_messaging_tools,
     register_shared_messaging_tools,
@@ -58,6 +59,7 @@ __all__ = [
     'register_shared_discussion_tools',
     'register_shared_file_tools',
     'register_shared_messaging_tools',
+    'register_media_gallery_tools',
     'register_shared_module_tools',
     'register_student_tools',
     'register_student_write_tools',

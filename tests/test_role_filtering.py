@@ -61,6 +61,9 @@ SHARED_TOOLS = {
     # self-identity (issue #171) — caller-scoped, no roster permission needed
     "get_my_enrollments",
     "get_my_profile",
+    # Kaltura Media Gallery (Canvas-authenticated shared reads)
+    "list_course_media",
+    "get_media_transcript",
 }
 
 # These two answer only about the authenticated caller, so unlike
@@ -200,7 +203,7 @@ class TestRoleFiltering:
         mcp = FastMCP(name="test-student")
         register_all_tools(mcp, role="student")
         tools = await _get_tool_names(mcp)
-        assert 25 <= len(tools) <= 40, f"Expected ~37 student tools, got {len(tools)}: {sorted(tools)}"
+        assert 25 <= len(tools) <= 42, f"Expected ~42 student tools, got {len(tools)}: {sorted(tools)}"
 
     @pytest.mark.asyncio
     async def test_educator_tool_count(self):

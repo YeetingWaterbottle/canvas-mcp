@@ -57,7 +57,7 @@ class Effect(StrEnum):
 
 
 TOOL_EFFECTS: dict[str, Effect] = {
-    # --- READ (59) ---
+    # --- READ (61) ---
     "analyze_peer_review_quality": Effect.READ,
     "check_enrollment": Effect.READ,
     "fetch_ufixit_report": Effect.READ,
@@ -84,6 +84,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "get_my_submission_status": Effect.READ,
     "get_my_todo_items": Effect.READ,
     "get_my_upcoming_assignments": Effect.READ,
+    "get_media_transcript": Effect.READ,
     "get_page_content": Effect.READ,
     "get_page_details": Effect.READ,
     "get_peer_review_assignments": Effect.READ,
@@ -101,6 +102,7 @@ TOOL_EFFECTS: dict[str, Effect] = {
     "list_code_api_modules": Effect.READ,
     "list_conversations": Effect.READ,
     "list_course_files": Effect.READ,
+    "list_course_media": Effect.READ,
     "list_courses": Effect.READ,
     "list_discussion_entries": Effect.READ,
     "list_discussion_topics": Effect.READ,
