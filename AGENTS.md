@@ -114,7 +114,7 @@ Course management, grading, and analytics. Requires instructor/TA role.
 | `send_bulk_messages_from_list` | Templated bulk messaging. **Two calls:** the first returns a preview + confirmation token and sends nothing; show the preview to the educator, then call again with the token and identical arguments. The token is single-use and dies if any argument changed |
 | `send_peer_review_inbox_messages` | Send direct Canvas Inbox messages about incomplete peer reviews; this is not Canvas's native reminder action. Requires `manage_grades` permission and uses **two calls** (preview + confirm) |
 | `create_announcement` | Post course announcements. Pre-checks Canvas's announcement permission; if Canvas silently creates a discussion instead, the tool deletes that unintended topic and reports failure (or warns if cleanup cannot be confirmed) |
-| `update_discussion_topic` | Edit discussion or announcement title/body and settings. Optional guards: `expect_body_sha256` (topics have no `updated_at`), `find`/`replace` on the message, `require` (see Guarded edits) |
+| `update_discussion_topic` | Edit discussion or announcement title/body and settings. Reads the topic before writing; anonymous or REST-unservable topics are refused with a Canvas UI direction and no update request. Optional guards: `expect_body_sha256` (topics have no `updated_at`), `find`/`replace` on the message, `require` (see Guarded edits) |
 | `update_syllabus` | Write the course Syllabus tab (`replace`, `append`, or `prepend`). Canvas keeps no revision history for the syllabus, so **replacing a syllabus that already has content is two calls** — preview + token, then confirm. Writing into an empty syllabus, appending, or prepending is a single call. The write is verified by reading the syllabus back. Optional guards: `expect_body_sha256` (printed by `get_syllabus`), `find`/`replace`, `require`; independent of the token |
 
 ### Untrusted Canvas content is fenced
@@ -165,9 +165,9 @@ Content access tools available to all authenticated users.
 | `update_module_item` | Update module item settings |
 | `delete_module_item` | Remove item from module |
 | `list_announcements` | Course announcements, and nothing else |
-| `list_discussion_topics` | Discussion forums (discussions only; set `include_announcements` to also list announcements). Shows `Anonymity:` when Canvas reports an `anonymous_state`. Canvas REST returns 404 for fully anonymous topics; the topic read tools then say the topic exists and must be opened in the Canvas UI, instead of reporting it missing |
+| `list_discussion_topics` | Discussion forums (discussions only; set `include_announcements` to also list announcements). Shows `Anonymity:` when Canvas reports an `anonymous_state`. Canvas REST returns 404 for anonymous topics; by default the read tools explain this and link to Canvas. Set `DISCUSSION_GRAPHQL_ENABLED=true` to enable the read-only GraphQL fallback |
 | `list_group_discussion_topics` | Topics inside every group space, including topics students started in a group (pass `group_id` to the other discussion read tools to read them) |
-| `get_discussion_topic_details` | One topic's details; `raw_dates=True` appends the topic's dates and, for a graded discussion, its assignment and checkpoint dates. Prints the message's SHA-256 for `update_discussion_topic`'s `expect_body_sha256` |
+| `get_discussion_topic_details` | One topic's details; `raw_dates=True` appends the topic's dates and, for a graded discussion, its assignment and checkpoint dates. On a GraphQL fallback, `raw_dates=True` reports unavailable date metadata and unknown grading status. Prints the message's SHA-256 for `update_discussion_topic`'s `expect_body_sha256` |
 | `list_discussion_entries` | Posts in a discussion |
 | `post_discussion_entry` | Add a discussion post |
 | `reply_to_discussion_entry` | Reply to a post |
@@ -319,7 +319,8 @@ body as Canvas returned it; get_syllabus and get_discussion_topic_details
 print it, and every guarded edit
 prints the new hash). A find/replace over an existing syllabus still previews
 and needs the confirmation token.
-Omit every guard parameter and the tools behave exactly as before.
+Omit every guard parameter for the normal write behavior; discussion-topic
+updates still perform the anonymous-topic preflight described above.
 ```
 
 ### Educator: Write the Syllabus

@@ -605,9 +605,15 @@
           "type": "object",
           "required": true,
           "description": "Rubric criterion ratings: {criterion_id: {points, comments?}}"
+        },
+        {
+          "name": "comment",
+          "type": "string",
+          "required": false,
+          "description": "Optional student-visible overall feedback; omit unless explicitly requested. Each call appends a new comment."
         }
       ],
-      "returns": "Confirmation of grade submission",
+      "returns": "Canvas response with grade/score consistent with the complete requested rubric total, refusal if rubric grading settings cannot be confirmed, or an unconfirmed-result warning; persistence and publication are not read back",
       "examples": [
         "Grade student 123's submission with 80 points on criterion _8027"
       ]
@@ -889,7 +895,7 @@
     {
       "name": "update_discussion_topic",
       "category": "educator",
-      "description": "Edit an existing discussion topic or announcement",
+      "description": "Edit an existing discussion topic or announcement after a REST preflight; anonymous and REST-unservable topics are refused without an update request",
       "parameters": [
         {
           "name": "course_identifier",

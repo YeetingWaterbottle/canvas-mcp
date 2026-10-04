@@ -833,11 +833,22 @@ Link a rubric to an assignment.
 #### `grade_with_rubric`
 Grade a student submission using a rubric.
 
+Before submitting, the tool reads the assignment's rubric and grading settings.
+It submits nothing if those settings cannot be read or
+`use_rubric_for_grading` is not explicitly true. Attach the rubric with
+`associate_rubric(..., use_for_grading=true)` or configure it in Canvas first.
+After submission, success requires a returned grade and a score matching the
+expected total for a complete rubric assessment, excluding criteria marked
+`ignore_for_scoring`.
+An unconfirmed result may already have saved an
+assessment; check Canvas before retrying.
+
 **Parameters:**
 - `course_identifier`: Course code or ID
 - `assignment_id`: Assignment ID
 - `user_id`: Student ID
 - `rubric_assessment`: JSON with criterion ratings
+- `comment` (optional): Student-visible feedback; omit unless explicitly requested
 
 ---
 
@@ -891,6 +902,13 @@ Grade multiple submissions concurrently.
 - `dry_run: true` previews the grade **and** any comment that would be posted
 - Can mix and match grading styles for different students
 - Automatically validates rubric configuration before grading
+- For any rubric-based grade, it first reads the rubric and grading settings;
+  an unreadable assignment or `use_rubric_for_grading` other than true stops
+  the entire batch before any grade is submitted
+- A rubric grade counts as successful only when Canvas returns a grade and
+  a score matching the expected total for a complete rubric assessment, excluding
+  criteria marked `ignore_for_scoring`; unconfirmed entries are reported as failed even
+  though an assessment may have been saved, so check Canvas before retrying
 - Use `dry_run=true` to preview grades before applying
 - For custom bulk grading logic that can return selected output, consider `execute_typescript` with `bulkGrade` from the code execution API
 
@@ -1280,6 +1298,11 @@ Start a new discussion forum.
 #### `update_discussion_topic`
 Edit an existing discussion topic or announcement (title, body, publish state, etc.).
 
+Every update first reads the topic through REST. Anonymous topics are refused
+without sending an update; open them in the Canvas UI to edit them. If REST
+returns 404 but the topic is still listed, the tool explains that it exists
+and REST does not serve it. The optional GraphQL fallback is read-only.
+
 **Parameters:**
 - `course_identifier`: Course code or ID
 - `topic_id`: Discussion topic ID
@@ -1296,7 +1319,7 @@ Edit an existing discussion topic or announcement (title, body, publish state, e
 - `find` / `replace` (optional): Edit one fragment of the current message instead of sending `message`. `find` must occur exactly once in the freshly fetched message; on zero or several matches the tool refuses and reports the count. `replace` may be empty to delete the fragment. Supplying `message` as well is an error.
 - `require` (optional): List of strings that must already be present in the current message (for example, to confirm an earlier edit is still in place), else the tool refuses.
 
-**Guarded edits (issue 419):** with any of the guards the tool fetches the topic, runs the checks, writes once, then reads it back. It reports success only if the read-back proves the write: the stored message equals the message the write should have produced (for find/replace, the fetched message with the one substitution), compared after whitespace normalization only, so dropped attributes and lost unrelated content both count, and every other field you asked to change reads back with the value sent. It prints the old and new body SHA-256. Anything it cannot establish, including HTML that Canvas rewrote, is reported as unconfirmed, never as success. With none of the guards the call behaves exactly as before.
+**Guarded edits (issue 419):** with any of the guards the tool uses the preflight topic read, runs the checks, writes once, then reads it back. It reports success only if the read-back proves the write: the stored message equals the message the write should have produced (for find/replace, the fetched message with the one substitution), compared after whitespace normalization only, so dropped attributes and lost unrelated content both count, and every other field you asked to change reads back with the value sent. It prints the old and new body SHA-256. Anything it cannot establish, including HTML that Canvas rewrote, is reported as unconfirmed, never as success. Without guards, ordinary topic updates still use the preflight read but do not add read-back verification.
 
 **Example:**
 ```
@@ -2162,13 +2185,22 @@ When Canvas reports a non-null `anonymous_state` for a topic
 (`partial_anonymity` or `full_anonymity`), the entry shows an `Anonymity:` line.
 `list_group_discussion_topics` does the same.
 
-**Anonymous topics:** Canvas's REST API answers 404 for topics created with
-full anonymity, although the topic list includes them. When
-`get_discussion_topic_details`, `list_discussion_entries` or
-`get_discussion_with_replies` gets a 404, the tool checks the topic list of the
-same course (or group). If the topic is listed, it says the topic exists, that
-REST does not serve it (most likely because it is anonymous), and to open it in
-the Canvas UI. A 404 for a topic that is not listed is reported as not found.
+**Anonymous topics:** Canvas's REST API answers 404 for anonymous topics
+(partial or full anonymity), although the topic list includes them. When
+`get_discussion_topic_details`, `list_discussion_entries`,
+`get_discussion_with_replies` or `get_discussion_entry_details` gets a 404, the
+tool checks the topic list of the same course (or group). If the topic is
+listed, the tool explains the REST limitation and links to Canvas by default. With
+`DISCUSSION_GRAPHQL_ENABLED=true` (operator opt-in), it reads through Canvas GraphQL and returns the same
+output as for any other topic; anonymous posts show only their anonymous alias.
+Pin status is unavailable in the fixed GraphQL query and is omitted. Entry read
+state is reported as unknown. `raw_dates=True` explicitly reports unavailable
+scheduling/assignment/checkpoint metadata on this path. Reaching the GraphQL
+page cap returns an incomplete-result error rather than partial content.
+A topic read this way is remembered for ten minutes, so later reads go straight
+to GraphQL. If GraphQL fails too, the tool says the topic exists, that REST does
+not serve it, and to open it in the Canvas UI. A 404 for a topic that is not
+listed is reported as not found.
 
 **Example:**
 ```
@@ -2288,7 +2320,7 @@ These tools help developers discover, explore, and execute Canvas code execution
 
 #### `search_canvas_tools`
 Search and discover available Canvas tools by keyword — both the registered
-MCP tools (the ~99 Python tools like `list_peer_reviews`,
+MCP tools (the Python tools like `list_peer_reviews`,
 `create_assignment`, called directly) and the TypeScript code execution API
 operations (used from `execute_typescript`). Matches against tool name and
 description.
